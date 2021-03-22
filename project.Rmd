@@ -1,0 +1,153 @@
+
+library(readxl)
+mydata <- readxl::read_excel('Training Data for Ag Project.xlsx')
+
+names(mydata)
+##Descriptive Analytics
+#1.	Plot the latitudes and longitudes on a map to visualize the locations of farms. 
+#Identify where the target/evaluation farm is located. 
+#It should be noted that most of the farms are located in the Midwest of the US.
+lat <- mydata$Latitude
+lon <- mydata$Longitude
+#2.	Generate frequency distribution for varieties. 
+#Decide if you have enough data for each variety to build dedicated prediction models for every variety. 
+variety <- mydata$Variety
+table(variety)
+plot(table(variety))
+library(plyr)
+count(mydata,'Variety')
+
+#3.	Check to see if there is any relationship between the locations and varieties. 
+#Explore if certain varieties are grown more often in some regions than in other regions.
+mydata  %>%
+  group_by(as.factor(Location))  %>%
+  summarise(count=count(Variety))
+#4.	Look for patterns in weather variables. 
+#Explore relationships between locations and weather related variables.
+cor(mydata$Location,mydata$Weather1)
+
+ cor(mydata$Location,mydata$Weather2)
+#5.	Plot the distribution of the yield variables. 
+data102 <- data.frame(mydata[mydata$Variety=='V102',])
+data102 <- data102[-7]
+data102<-na.omit(data102)
+#Based on the plot, what do you think a realistic goal for the optimal portfolio at the target farm?
+yield <- mydata$Variety_Yield
+plot(yield)
+##  Predictive Analytics 
+#  1.	Linear Regression 
+x = model.matrix(Variety_Yield~.,data102)[,-7]
+y = data102$Variety_Yield
+train = sample(1:nrow(x), nrow(x)/2) ##default replace = FALSE
+test = (-train)
+y.test = y[test]
+lmmodel <- lm(Variety_Yield~.-GrowingSeason-Location-Latitude-Longitude, data=data102,subset=train)
+summary(lmmodel)
+#ypre <- predict(lmmodel,data102[test,])
+#mean((ypre-y.test)^2)
+
+#2.	LASSO
+
+library(glmnet)
+set.seed(1)
+grid = 10^seq(10,-2,length=100)
+lasso.mod = glmnet(x[train,],y[train],alpha = 1,lambda = grid)
+plot(lasso.mod)
+set.seed(12)
+cv.out = cv.glmnet(x[train,],y[train],alpha=1)
+plot(cv.out)
+bestlam = cv.out$lambda.min
+bestlam
+lasso.pred=predict(lasso.mod,s=bestlam,newx=x[test,])
+#mean((lasso.pred-y.test)^2)
+
+#3.	Regression Tree
+library(tree)
+tree.102=tree(Variety_Yield~.,data102,subset=train)
+summary(tree.102)
+plot(tree.102)
+text(tree.102,pretty=0)
+yhat = predict(tree.102,newdata=data102[-train,]) 
+vy.test=data102[-train,"Variety_Yield"]
+mean((yhat-vy.test)^2)
+#4.	Bagging
+library(randomForest)
+set.seed(123)
+datarf <- data102[-c(3,11)]
+bag.102 = randomForest(Variety_Yield~.-GrowingSeason-Location-Latitude-Longitude, 
+                       data=datarf, subset=train, mtry=13, importance=TRUE)
+bag.102
+y.test <- datarf$Variety_Yield[test]
+yhat.rf = predict(bag.102,newdata = datarf[-train,])
+mean((yhat.rf-y.test)^2)
+
+#5.	Random Forest
+set.seed(21)
+rf.102 = randomForest(Variety_Yield~.-GrowingSeason-Location-Latitude-Longitude, 
+                      data=datarf,subset=train,mtry=6,importance = TRUE)
+
+yhat.rf = predict(rf.102,newdata = datarf[-train,])
+mean((yhat.rf-y.test)^2)
+varImpPlot(rf.102)
+#6.	Boosted Trees
+library(gbm)
+set.seed(31)
+boost.102 = gbm(Variety_Yield~.-GrowingSeason-Location-Latitude-Longitude, 
+                   data=datarf[train,],distribution = "gaussian", n.trees=5000,interaction.depth=4)
+summary(boost.102)
+yhat.boost=predict(boost.102,newdata=datarf[-train,],n.trees=5000)
+mean((yhat.boost-y.test)^2)
+#7.	Neural Network  
+
+library(neuralnet)
+nn <- neuralnet(Variety_Yield ~., 
+                data = datarf[train,], linear.output = F, hidden = 3)
+
+nn$weights
+plot(nn, rep="best")
+prediction(nn)
+yhat.nn=predict(nn,newdata=datarf[-train,])
+mean((yhat.nn-y.test)^2)
+
+
+##1.	Naïve Heuristics
+library(dplyr)
+mydata   %>%
+  group_by(Variety)   %>%
+  summarize(mean=mean(Variety_Yield))   %>%
+  ungroup()    %>%
+  arrange(desc(mean))
+
+
+
+##2.	Mean-Risk Heuristics
+
+library(dplyr)
+mydata   %>%
+  group_by(Variety)   %>%
+  summarize(mean=mean(Variety_Yield),risk=Probability)   %>%
+  ungroup()    %>%
+  arrange(desc(risk),desc(mean))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
